@@ -1,0 +1,74 @@
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model User {
+  id           String    @id @default(uuid())
+  email        String?   @unique
+  username     String    @unique
+  avatarUrl    String?
+  githubToken  String?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  servers      Server[]
+  projects     Project[]
+}
+
+model Server {
+  id          String    @id @default(uuid())
+  name        String
+  ip          String
+  status      String    @default("OFFLINE") // OFFLINE, ONLINE
+  agentToken  String    @unique
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  userId      String?
+  user        User?     @relation(fields: [userId], references: [id])
+  projects    Project[]
+}
+
+model Project {
+  id                   String                @id @default(uuid())
+  repoUrl              String
+  branch               String                @default("main")
+  subdomain            String                @unique
+  port                 Int
+  status               String                @default("READY") // READY, DEPLOYING, SUCCESS, FAILED
+  createdAt            DateTime              @default(now())
+  updatedAt            DateTime              @updatedAt
+  serverId             String
+  server               Server                @relation(fields: [serverId], references: [id])
+  userId               String?
+  user                 User?                 @relation(fields: [userId], references: [id])
+  deployments          Deployment[]
+  environmentVariables EnvironmentVariable[]
+}
+
+model Deployment {
+  id           String   @id @default(uuid())
+  commitHash   String?
+  buildStatus  String   @default("QUEUED") // QUEUED, BUILDING, SUCCESS, FAILED
+  logSummary   String   @default("")
+  releasePath  String?
+  duration     Int      @default(0) // in seconds
+  createdAt    DateTime @default(now())
+  projectId    String
+  project      Project  @relation(fields: [projectId], references: [id])
+}
+
+model EnvironmentVariable {
+  id        String   @id @default(uuid())
+  key       String
+  value     String   // Encrypted value
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([projectId, key])
+}

@@ -1,0 +1,67 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:wght@300;400;500;600;700&display=swap');
+
+:root {
+  --font-outfit: 'Outfit', 'Inter', sans-serif;
+}
+
+body {
+  background-color: #0a0a0f;
+  color: #f8fafc;
+  font-family: var(--font-outfit);
+  overflow-x: hidden;
+}
+
+/* Premium Glassmorphism utility classes */
+.glass-panel {
+  background: rgba(22, 22, 38, 0.55);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+}
+
+.glass-panel-hover {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.glass-panel-hover:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(99, 102, 241, 0.35);
+  box-shadow: 0 10px 40px 0 rgba(99, 102, 241, 0.1);
+  transform: translateY(-2px);
+}
+
+.glow-btn {
+  transition: all 0.2s ease-in-out;
+}
+
+.glow-btn:hover {
+  box-shadow: 0 0 15px rgba(99, 102, 241, 0.4);
+}
+
+.glow-btn-accent:hover {
+  box-shadow: 0 0 15px rgba(0, 255, 204, 0.4);
+}
+
+/* Custom Webkit scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(10, 10, 15, 0.5);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(99, 102, 241, 0.5);
+}
