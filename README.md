@@ -21,8 +21,8 @@ We configure the workspace utilizing **pnpm workspaces**:
 | Phase | Description | Key Modules | Status |
 | :--- | :--- | :--- | :---: |
 | **Phase 1** | Hub Setup & OAuth | Next.js layout, NestJS Fastify setup, PostgreSQL push | **Completed** ✅ |
-| **Phase 2** | Go Agent & WebSockets | Telemetry metrics streaming, agent authentication | *Up Next* 🚀 |
-| **Phase 3** | Deployments Pipeline | Webhooks validation, BullMQ processes, Nginx mapping | *Pending* ⏳ |
+| **Phase 2** | Go Agent & WebSockets | Telemetry metrics streaming, agent authentication | **Completed** ✅ |
+| **Phase 3** | Deployments Pipeline | Webhooks validation, BullMQ processes, Nginx mapping | *Up Next* 🚀 |
 | **Phase 4** | Rollbacks & Hardening | Symlink release swaps, xterm log viewer, SSL configs | *Pending* ⏳ |
 
 ---
@@ -31,8 +31,8 @@ We configure the workspace utilizing **pnpm workspaces**:
 
 - [x] **Prerequisites**: Monorepo workspace mapping (`pnpm-workspace.yaml`).
 - [ ] **GitHub integration**: OAuth login redirects and public/private repo query routes.
-- [ ] **Server registration**: API tokens generation and registration handshakes.
-- [ ] **Go WebSocket Client**: Persistent connection to Hub with auto-reconnect logic.
+- [x] **Server registration**: API tokens generation and registration handshakes.
+- [x] **Go WebSocket Client**: Persistent connection to Hub with auto-reconnect logic.
 - [ ] **Auto Framework Detection**: Detect Node, Python, static HTML, etc.
 - [ ] **Pre-deployment checks**: Validating port binds and server free memory capacity.
 - [ ] **Dependency Provisioning**: Apt script triggers to install required packages.
@@ -41,7 +41,7 @@ We configure the workspace utilizing **pnpm workspaces**:
 - [ ] **Webhook Autodeploy**: Push-triggered signatures verification hooks.
 - [ ] **Log streaming**: Real-time stdout/stderr console streaming.
 - [ ] **Symlinks Rollbacks**: Swapping domain folder links instantly.
-- [ ] **Telemetry Metrics**: Low-overhead CPU, memory, and disk telemetry parsing.
+- [x] **Telemetry Metrics**: Low-overhead CPU, memory, and disk telemetry parsing.
 
 ---
 
