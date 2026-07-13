@@ -24,6 +24,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   // Map to track active socket connections to server IDs
   private activeConnections = new Map<string, string>();
+  // Map to track active server IDs to Socket instances
+  private serverSockets = new Map<string, Socket>();
 
   constructor(private prisma: PrismaService) {}
 
@@ -35,6 +37,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const serverId = this.activeConnections.get(client.id);
     if (serverId) {
       this.activeConnections.delete(client.id);
+      this.serverSockets.delete(serverId);
       try {
         await this.prisma.server.update({
           where: { id: serverId },
@@ -47,6 +50,22 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
         console.error(`Failed to update status for disconnected server ${serverId}:`, err.message);
       }
     }
+  }
+
+  /**
+   * Dispatches a WebSocket event to a connected Agent.
+   * @param serverId Target server ID
+   * @param event Socket event name
+   * @param payload Payload object
+   */
+  sendToAgent(serverId: string, event: string, payload: any): boolean {
+    const socket = this.serverSockets.get(serverId);
+    if (!socket) {
+      console.warn(`⚠️ Cannot send event "${event}" to server ${serverId}: Agent not connected.`);
+      return false;
+    }
+    socket.emit(event, payload);
+    return true;
   }
 
   @SubscribeMessage('agent:auth')
@@ -75,6 +94,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
       // Associate socket with server ID
       this.activeConnections.set(client.id, dbServer.id);
+      this.serverSockets.set(dbServer.id, client);
 
       // Update server status to ONLINE
       await this.prisma.server.update({
@@ -106,6 +126,85 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     // Broadcast these metrics to panel dashboard clients monitoring this server
     this.server.emit(`metrics:server:${serverId}`, metrics);
-    console.log(`📊 Metrics received from Server ${serverId}: CPU: ${metrics.cpuPercent}%, RAM: ${Math.round(metrics.ramUsedBytes / 1024 / 1024)}MB`);
+  }
+
+  @SubscribeMessage('deploy:log')
+  async handleDeployLog(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { deploymentId: string; stream: string; chunk: string }
+  ) {
+    const serverId = this.activeConnections.get(client.id);
+    if (!serverId) {
+      client.disconnect(true);
+      return;
+    }
+
+    if (!data?.deploymentId || !data?.chunk) return;
+
+    try {
+      // Append the log chunk to logSummary. Atomic SQL concatenation prevents write collisions
+      await this.prisma.$executeRaw`UPDATE "Deployment" SET "logSummary" = "logSummary" || ${data.chunk} WHERE id = ${data.deploymentId}`;
+    } catch (err) {
+      try {
+        // Fallback for non-Postgres databases
+        const dep = await this.prisma.deployment.findUnique({ where: { id: data.deploymentId } });
+        if (dep) {
+          await this.prisma.deployment.update({
+            where: { id: data.deploymentId },
+            data: { logSummary: dep.logSummary + data.chunk },
+          });
+        }
+      } catch (fallbackErr) {
+        console.error(`Failed to append log chunk for deployment ${data.deploymentId}:`, fallbackErr.message);
+      }
+    }
+  }
+
+  @SubscribeMessage('deploy:status')
+  async handleDeployStatus(
+    @ConnectedSocket() client: Socket,
+    @MessageBody() data: { deploymentId: string; status: 'SUCCESS' | 'FAILED'; commitHash?: string; releasePath?: string }
+  ) {
+    const serverId = this.activeConnections.get(client.id);
+    if (!serverId) {
+      client.disconnect(true);
+      return;
+    }
+
+    if (!data?.deploymentId || !data?.status) return;
+
+    try {
+      const dbDeployment = await this.prisma.deployment.findUnique({
+        where: { id: data.deploymentId },
+      });
+
+      if (!dbDeployment) {
+        console.error(`Deployment ${data.deploymentId} not found.`);
+        return;
+      }
+
+      const duration = Math.round((Date.now() - dbDeployment.createdAt.getTime()) / 1000);
+
+      await this.prisma.deployment.update({
+        where: { id: data.deploymentId },
+        data: {
+          buildStatus: data.status,
+          commitHash: data.commitHash || dbDeployment.commitHash,
+          releasePath: data.releasePath,
+          duration,
+        },
+      });
+
+      await this.prisma.project.update({
+        where: { id: dbDeployment.projectId },
+        data: {
+          status: data.status === 'SUCCESS' ? 'SUCCESS' : 'FAILED',
+        },
+      });
+
+      console.log(`🚀 Deployment ${data.deploymentId} ended with status: ${data.status} (Duration: ${duration}s)`);
+    } catch (err) {
+      console.error(`Failed to handle deploy status for ${data.deploymentId}:`, err.message);
+    }
   }
 }

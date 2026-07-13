@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -9,18 +10,44 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"serdaddy-agent/monitor"
+	"serdaddy-agent/runner"
 )
 
 var (
-	panelURL  = flag.String("panel", "http://localhost:4000", "SerDaddy Hub API address (e.g., http://localhost:4000)")
-	token     = flag.String("token", "MOCK_SERVER_TOKEN", "Registration Agent Token key")
-	mockMode  = flag.Bool("mock", false, "Enable mock mode to simulate Linux metrics (CPU/RAM/Disk)")
+	panelURL = flag.String("panel", "http://localhost:4000", "SerDaddy Hub API address (e.g., http://localhost:4000)")
+	token    = flag.String("token", "MOCK_SERVER_TOKEN", "Registration Agent Token key")
+	mockMode = flag.Bool("mock", false, "Enable mock mode to simulate Linux metrics (CPU/RAM/Disk)")
 )
+
+// SocketIOEvent represents a standard socket.io namespace message event structure.
+type SocketIOEvent struct {
+	Name    string
+	Payload json.RawMessage
+}
+
+// UnmarshalJSON parses Socket.io event array format: [eventName, payload]
+func (e *SocketIOEvent) UnmarshalJSON(data []byte) error {
+	var raw []json.RawMessage
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+	if len(raw) < 1 {
+		return fmt.Errorf("empty event array")
+	}
+	if err := json.Unmarshal(raw[0], &e.Name); err != nil {
+		return err
+	}
+	if len(raw) > 1 {
+		e.Payload = raw[1]
+	}
+	return nil
+}
 
 func main() {
 	flag.Parse()
@@ -47,7 +74,6 @@ func main() {
 	}
 
 	// Socket.io v4 WebSocket connection path (Namespace: /agent)
-	// EIO=4 (Engine.io v4) uses the query parameter namespace mapping
 	socketURL := fmt.Sprintf("%s://%s/socket.io/?EIO=4&transport=websocket", scheme, parsedURL.Host)
 	log.Printf("Connecting to SerDaddy Hub WebSocket at: %s", socketURL)
 
@@ -80,6 +106,14 @@ func runClient(socketURL string, agentToken string, mock bool, interrupt chan os
 	done := make(chan struct{})
 	errChan := make(chan error, 1)
 
+	// Mutex to synchronize writes to the WebSocket connection (concurrency safety)
+	var writeMutex sync.Mutex
+	safeWrite := func(messageType int, data []byte) error {
+		writeMutex.Lock()
+		defer writeMutex.Unlock()
+		return c.WriteMessage(messageType, data)
+	}
+
 	// Start reading standard WebSocket packets in the background
 	go func() {
 		defer close(done)
@@ -92,44 +126,50 @@ func runClient(socketURL string, agentToken string, mock bool, interrupt chan os
 			
 			msgStr := string(message)
 			
-			// Engine.io Packet types:
-			// '0' -> Open (Handshake JSON payload contains sid, pingInterval, pingTimeout)
-			// '2' -> Ping (Client must respond with pong '3')
-			// '3' -> Pong
-			// '4' -> Message (Socket.io event payload follows: e.g. 40/agent, is Connect)
-			
 			if strings.HasPrefix(msgStr, "0") {
 				log.Println("🤖 Engine.io handshake opened. Joining namespace '/agent'...")
-				// Connect to socket.io '/agent' namespace
-				// Format: 40/agent,
-				err := c.WriteMessage(websocket.TextMessage, []byte("40/agent,"))
+				err := safeWrite(websocket.TextMessage, []byte("40/agent,"))
 				if err != nil {
 					errChan <- err
 					return
 				}
 			} else if strings.HasPrefix(msgStr, "2") {
 				// Ping received, write Pong back immediately
-				err := c.WriteMessage(websocket.TextMessage, []byte("3"))
+				err := safeWrite(websocket.TextMessage, []byte("3"))
 				if err != nil {
 					errChan <- err
 					return
 				}
 			} else if strings.HasPrefix(msgStr, "40/agent,") {
 				log.Println("🛡️ Connected to Namespace '/agent'. Sending authentication token...")
-				// Auth event structure: 42/agent,["agent:auth",{"agentToken":"..."}]
 				authPayload := fmt.Sprintf(`42/agent,["agent:auth",{"agentToken":"%s"}]`, agentToken)
-				err := c.WriteMessage(websocket.TextMessage, []byte(authPayload))
+				err := safeWrite(websocket.TextMessage, []byte(authPayload))
 				if err != nil {
 					errChan <- err
 					return
 				}
 			} else if strings.HasPrefix(msgStr, "42/agent,") {
 				// Socket.io Namespace Event Message
-				eventData := msgStr[9:] // Strip the Socket.io namespace header prefix
-				log.Printf("📥 Message received from Hub: %s", eventData)
+				eventData := []byte(msgStr[9:])
+				log.Printf("📥 Message received from Hub: %s", string(eventData))
 				
-				if strings.Contains(eventData, "auth:success") {
+				var ev SocketIOEvent
+				if err := json.Unmarshal(eventData, &ev); err != nil {
+					log.Printf("Failed to unmarshal socket.io event: %v", err)
+					continue
+				}
+
+				switch ev.Name {
+				case "auth:success":
 					log.Println("🎉 Authentication success! Agent is registered ONLINE.")
+				case "deploy:start":
+					log.Println("📦 deploy:start event received! Spawning build execution...")
+					go runner.ExecuteDeployment(safeWrite, ev.Payload, mock)
+				case "deploy:rollback":
+					log.Println("🔄 deploy:rollback event received! Spawning rollback runner...")
+					go runner.ExecuteRollback(safeWrite, ev.Payload, mock)
+				default:
+					log.Printf("Unhandled event: %s", ev.Name)
 				}
 			}
 		}
@@ -147,17 +187,19 @@ func runClient(socketURL string, agentToken string, mock bool, interrupt chan os
 			// Emit metrics package
 			metricsJSON := generateMetrics(mock)
 			metricsPayload := fmt.Sprintf(`42/agent,["metrics:push",%s]`, metricsJSON)
-			err := c.WriteMessage(websocket.TextMessage, []byte(metricsPayload))
+			err := safeWrite(websocket.TextMessage, []byte(metricsPayload))
 			if err != nil {
 				log.Printf("Failed to emit metrics: %v", err)
 			}
 		case sig := <-interrupt:
 			log.Printf("Interrupt signal received (%v). Cleaning up and closing connection...", sig)
 			// Send Engine.io disconnect packet (41/agent,)
-			_ = c.WriteMessage(websocket.TextMessage, []byte("41/agent,"))
+			_ = safeWrite(websocket.TextMessage, []byte("41/agent,"))
 			
 			// Cleanly close connection by sending close frame and waiting for write to flush
+			writeMutex.Lock()
 			err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+			writeMutex.Unlock()
 			if err != nil {
 				return err
 			}
