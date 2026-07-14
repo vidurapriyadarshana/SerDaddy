@@ -168,6 +168,9 @@ func runClient(socketURL string, agentToken string, mock bool, interrupt chan os
 				case "deploy:rollback":
 					log.Println("🔄 deploy:rollback event received! Spawning rollback runner...")
 					go runner.ExecuteRollback(safeWrite, ev.Payload, mock)
+				case "deploy:delete":
+					log.Println("🗑️ deploy:delete event received! Spawning cleanup runner...")
+					go runner.ExecuteDeletion(safeWrite, ev.Payload, mock)
 				default:
 					log.Printf("Unhandled event: %s", ev.Name)
 				}

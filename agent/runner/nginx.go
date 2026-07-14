@@ -53,14 +53,28 @@ WantedBy=multi-user.target
 	return nil
 }
 
-// WriteNginxConfig generates Nginx virtual block reverse proxy configuration.
-func WriteNginxConfig(projectName string, subdomain string, port int, mock bool) error {
+// WriteNginxConfig generates Nginx virtual block configuration (proxy pass for dynamic apps, root dir for static sites).
+func WriteNginxConfig(projectName string, subdomain string, port int, isStatic bool, mock bool) error {
 	if mock {
-		log.Printf("[Mock Nginx] Writing reverse proxy block for subdomain %s -> local port %d", subdomain, port)
+		log.Printf("[Mock Nginx] Writing config for subdomain %s (isStatic: %t) -> port/root", subdomain, isStatic)
 		return nil
 	}
 
-	nginxContent := fmt.Sprintf(`server {
+	var nginxContent string
+	if isStatic {
+		nginxContent = fmt.Sprintf(`server {
+    listen 80;
+    server_name %s;
+    root /var/www/projects/%s/current;
+    index index.html index.htm;
+
+    location / {
+        try_files $uri $uri/ =404;
+    }
+}
+`, subdomain, projectName)
+	} else {
+		nginxContent = fmt.Sprintf(`server {
     listen 80;
     server_name %s;
 
@@ -74,6 +88,7 @@ func WriteNginxConfig(projectName string, subdomain string, port int, mock bool)
     }
 }
 `, subdomain, port)
+	}
 
 	availPath := fmt.Sprintf("/etc/nginx/sites-available/serdaddy-project-%s", projectName)
 	enabPath := fmt.Sprintf("/etc/nginx/sites-enabled/serdaddy-project-%s", projectName)

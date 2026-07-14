@@ -26,6 +26,38 @@ export default function ServerDetail() {
   const [isClient, setIsClient] = useState(false);
   const [server, setServer] = useState<any>(null);
   const [username, setUsername] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+
+  const handleDeleteServer = async () => {
+    if (!confirm("⚠️ WARNING: Are you absolutely sure you want to delete this VPS server node? This will unregister it from SerDaddy. You must delete all linked projects on this server first! This action cannot be undone.")) {
+      return;
+    }
+
+    const activeUserId = localStorage.getItem("userId");
+    if (!activeUserId) return;
+
+    try {
+      setIsDeleting(true);
+      const res = await fetch(`http://localhost:4000/api/servers/${id}`, {
+        method: "DELETE",
+        headers: {
+          "x-user-id": activeUserId,
+        },
+      });
+
+      if (res.ok) {
+        window.location.href = "/dashboard";
+      } else {
+        const err = await res.json();
+        alert(err.message || "Failed to delete server.");
+      }
+    } catch (err) {
+      console.error("Failed to delete server:", err);
+      alert("Failed to delete server due to a network connection failure.");
+    } finally {
+      setIsDeleting(false);
+    }
+  };
 
   const fetchServerDetails = async () => {
     const activeUserId = localStorage.getItem("userId");
@@ -295,6 +327,28 @@ export default function ServerDetail() {
             </div>
           </div>
         )}
+
+        {/* Danger Zone */}
+        <div className="glass-panel p-6 rounded-3xl border-danger/10 bg-danger/[0.01]">
+          <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+            <div>
+              <h3 className="text-sm font-bold text-danger uppercase tracking-wider flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-danger animate-pulse" /> Danger Zone
+              </h3>
+              <p className="text-xs text-slate-400 mt-1.5 leading-relaxed">
+                Permanently remove this VPS server node from your SerDaddy account. 
+                Please note that you must delete all projects deployed on this server first.
+              </p>
+            </div>
+            <button
+              onClick={handleDeleteServer}
+              disabled={isDeleting}
+              className="py-3 px-5 bg-danger/10 hover:bg-danger text-danger hover:text-white text-xs font-extrabold rounded-xl border border-danger/20 transition-all uppercase tracking-wider shrink-0"
+            >
+              {isDeleting ? "Deleting..." : "Delete Server Node"}
+            </button>
+          </div>
+        </div>
 
       </main>
     </div>

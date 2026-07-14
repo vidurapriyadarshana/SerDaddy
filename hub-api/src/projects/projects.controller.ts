@@ -41,4 +41,12 @@ export class ProjectsController {
   ) {
     return this.service.removeEnvVariable(projectId, key);
   }
+
+  @Delete(':id')
+  async deleteProject(
+    @Headers('x-user-id') userId: string,
+    @Param('id') id: string
+  ) {
+    return this.service.deleteProject(userId, id);
+  }
 }

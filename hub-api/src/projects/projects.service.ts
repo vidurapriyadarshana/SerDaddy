@@ -1,10 +1,14 @@
 import { Injectable, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { encrypt } from '../utils/crypto';
+import { AgentGateway } from '../socket/agent.gateway';
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly gateway: AgentGateway
+  ) {}
 
   async createProject(userId: string, data: { serverId: string; repoUrl: string; branch: string; subdomain: string }) {
     // Check if subdomain is already taken
@@ -25,7 +29,7 @@ export class ProjectsService {
       data: {
         repoUrl: data.repoUrl,
         branch: data.branch || 'main',
-        subdomain: data.subdomain,
+        subdomain: data.subdomain.trim(),
         port: assignedPort,
         status: 'READY',
         serverId: data.serverId,
@@ -99,5 +103,42 @@ export class ProjectsService {
     } catch (err) {
       throw new NotFoundException(`Environment variable with key "${key}" not found.`);
     }
+  }
+
+  async deleteProject(userId: string, id: string) {
+    // 1. Find project mapping and verify owner
+    const project = await this.prisma.project.findFirst({
+      where: { id, userId },
+      include: { server: true },
+    });
+
+    if (!project) {
+      throw new NotFoundException(`Project with ID ${id} not found.`);
+    }
+
+    const serverId = project.serverId;
+
+    // 2. Extract projectName from Git URL
+    const parts = project.repoUrl.split('/');
+    const lastPart = parts[parts.length - 1];
+    const projectName = lastPart.replace(/\.git$/, '');
+
+    // 3. Clear database records inside transaction
+    await this.prisma.$transaction([
+      this.prisma.environmentVariable.deleteMany({ where: { projectId: id } }),
+      this.prisma.deployment.deleteMany({ where: { projectId: id } }),
+      this.prisma.project.delete({ where: { id } }),
+    ]);
+
+    // 4. Dispatch deploy:delete to Go Agent if target server is ONLINE
+    if (project.server.status === 'ONLINE') {
+      try {
+        this.gateway.sendToAgent(serverId, 'deploy:delete', { projectName });
+      } catch (err) {
+        console.error(`Failed to send deploy:delete event to agent:`, err.message);
+      }
+    }
+
+    return { message: `Project ${projectName} deleted successfully.` };
   }
 }

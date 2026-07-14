@@ -23,6 +23,7 @@ type DeployStartPayload struct {
 	RepoURL      string            `json:"repoUrl"`
 	Branch       string            `json:"branch"`
 	AssignedPort int               `json:"assignedPort"`
+	Subdomain    string            `json:"subdomain"`
 	Env          map[string]string `json:"env"`
 }
 
@@ -162,8 +163,13 @@ func runMockDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 	time.Sleep(500 * time.Millisecond)
 
 	// Mock writing systemd/nginx & symlinks
+	subdomain := payload.Subdomain
+	if subdomain == "" {
+		subdomain = projectName + ".local"
+	}
+
 	_ = WriteSystemdService(projectName, payload.AssignedPort, true)
-	_ = WriteNginxConfig(projectName, projectName+".local", payload.AssignedPort, true)
+	_ = WriteNginxConfig(projectName, subdomain, payload.AssignedPort, false, true)
 	releasePath, _ := SwapReleaseSymlink(projectName, commitHash, true)
 	_ = RestartProjectService(projectName, true)
 
@@ -172,7 +178,7 @@ func runMockDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Swapped symbolic link pointer /current -> release active folder.\n")
 	
 	// Provision Let's Encrypt SSL
-	_ = ProvisionSSL(projectName+".local", "admin@serdaddy.com", true)
+	_ = ProvisionSSL(subdomain, "admin@serdaddy.com", true)
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Let's Encrypt SSL certificate registered.\n")
 
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Build completed successfully! Status set to SUCCESS.\n")
@@ -249,8 +255,10 @@ func runRealDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 	os.Symlink(envProdPath, envReleasePath)
 
 	// Scan frameworks
+	isStatic := true
 	var buildCmd *exec.Cmd
 	if _, err := os.Stat(filepath.Join(currentReleaseDir, "package.json")); err == nil {
+		isStatic = false
 		streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] package.json detected. Running Node installer...\n")
 		// Use npm ci and build
 		installCmd := exec.Command("npm", "ci")
@@ -275,12 +283,14 @@ func runRealDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Phase 4/4: Configuration & Promoting Release...\n")
 
-	// Write Systemd Service & Nginx Router Mapping
-	err = WriteSystemdService(projectName, payload.AssignedPort, false)
-	if err != nil {
-		streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] ERROR: Systemd config failed: %s\n", err.Error()))
-		sendStatus(safeWrite, payload.DeploymentID, "FAILED", commitHash, "")
-		return
+	// Write Systemd Service if dynamic
+	if !isStatic {
+		err = WriteSystemdService(projectName, payload.AssignedPort, false)
+		if err != nil {
+			streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] ERROR: Systemd config failed: %s\n", err.Error()))
+			sendStatus(safeWrite, payload.DeploymentID, "FAILED", commitHash, "")
+			return
+		}
 	}
 
 	// Promote symlink target
@@ -291,24 +301,31 @@ func runRealDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 		return
 	}
 
-	err = WriteNginxConfig(projectName, projectName+".local", payload.AssignedPort, false)
+	subdomain := payload.Subdomain
+	if subdomain == "" {
+		subdomain = projectName + ".local"
+	}
+
+	err = WriteNginxConfig(projectName, subdomain, payload.AssignedPort, isStatic, false)
 	if err != nil {
 		streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] ERROR: Nginx config failed: %s\n", err.Error()))
 		sendStatus(safeWrite, payload.DeploymentID, "FAILED", commitHash, releasePath)
 		return
 	}
 
-	err = RestartProjectService(projectName, false)
-	if err != nil {
-		streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] ERROR: Service restart failed: %s\n", err.Error()))
-		sendStatus(safeWrite, payload.DeploymentID, "FAILED", commitHash, releasePath)
-		return
+	if !isStatic {
+		err = RestartProjectService(projectName, false)
+		if err != nil {
+			streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] ERROR: Service restart failed: %s\n", err.Error()))
+			sendStatus(safeWrite, payload.DeploymentID, "FAILED", commitHash, releasePath)
+			return
+		}
 	}
 
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Swapped release symbolic links, reloaded routers, and restarted processes.\n")
 	
 	// Provision Let's Encrypt SSL using Certbot
-	sslErr := ProvisionSSL(projectName+".local", "admin@serdaddy.com", false)
+	sslErr := ProvisionSSL(subdomain, "admin@serdaddy.com", false)
 	if sslErr != nil {
 		streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] WARNING: Let's Encrypt SSL registration skipped: %s\n", sslErr.Error()))
 	} else {
@@ -351,4 +368,47 @@ func runCommandWithStreamingLogs(safeWrite SafeWriteFunc, deploymentID string, c
 	}
 
 	return cmd.Wait()
+}
+
+type DeployDeletePayload struct {
+	ProjectName string `json:"projectName"`
+}
+
+func ExecuteDeletion(safeWrite SafeWriteFunc, payloadRaw json.RawMessage, mock bool) {
+	var payload DeployDeletePayload
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		log.Printf("Failed to unmarshal deploy delete payload: %v", err)
+		return
+	}
+
+	projectName := payload.ProjectName
+	log.Printf("🗑️ Executing cleanup for project: %s", projectName)
+
+	if mock {
+		log.Printf("[Mock Deletion] Cleaned up configurations and folders for project %s", projectName)
+		return
+	}
+
+	// 1. Stop and disable systemd service
+	log.Printf("Stopping and disabling systemd service for %s...", projectName)
+	_ = exec.Command("sudo", "systemctl", "stop", projectName).Run()
+	_ = exec.Command("sudo", "systemctl", "disable", projectName).Run()
+
+	// 2. Remove systemd service file
+	serviceFilePath := fmt.Sprintf("/etc/systemd/system/%s.service", projectName)
+	_ = exec.Command("sudo", "rm", "-f", serviceFilePath).Run()
+	_ = exec.Command("sudo", "systemctl", "daemon-reload").Run()
+
+	// 3. Remove Nginx configuration
+	nginxAvailablePath := fmt.Sprintf("/etc/nginx/sites-available/%s", projectName)
+	nginxEnabledPath := fmt.Sprintf("/etc/nginx/sites-enabled/%s", projectName)
+	_ = exec.Command("sudo", "rm", "-f", nginxAvailablePath).Run()
+	_ = exec.Command("sudo", "rm", "-f", nginxEnabledPath).Run()
+	_ = exec.Command("sudo", "systemctl", "reload", "nginx").Run()
+
+	// 4. Remove project folder
+	projectDirPath := fmt.Sprintf("/var/www/projects/%s", projectName)
+	_ = exec.Command("sudo", "rm", "-rf", projectDirPath).Run()
+
+	log.Printf("✅ Project %s cleanup complete on host VPS.", projectName)
 }

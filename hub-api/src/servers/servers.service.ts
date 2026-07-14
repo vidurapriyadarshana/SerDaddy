@@ -92,12 +92,7 @@ cd /var/www/serdaddy-agent
 # 4. Fetch the Go agent binary
 echo "📥 Downloading agent binary..."
 # Dynamically pulls compiled agent matching architecture:
-sudo curl -sSL -o serdaddy-agent "${panelUrl}/api/agent/download/linux-amd64" || true
-# Fallback helper compiling or placeholder if not built yet:
-if [ ! -f serdaddy-agent ] || [ ! -s serdaddy-agent ]; then
-  echo "⚠️ Binary download not hosted yet. Creating agent script runner..."
-  sudo touch serdaddy-agent
-fi
+sudo curl -sSL -o serdaddy-agent "${panelUrl}/api/servers/download/linux-amd64"
 sudo chmod +x serdaddy-agent
 
 # 5. Create Systemd Service Configuration
@@ -123,9 +118,38 @@ EOF
 echo "🔄 Starting SerDaddy Agent Daemon..."
 sudo systemctl daemon-reload
 sudo systemctl enable serdaddy-agent.service
-sudo systemctl start serdaddy-agent.service
+sudo systemctl restart serdaddy-agent.service
 
 echo "✅ SerDaddy Agent successfully registered and started! Check your Control Panel."
 `;
+  }
+
+  async deleteServer(userId: string, id: string) {
+    // 1. Verify server ownership
+    const server = await this.prisma.server.findFirst({
+      where: { id, userId },
+    });
+
+    if (!server) {
+      throw new NotFoundException(`Server node with ID ${id} not found.`);
+    }
+
+    // 2. Safeguard check: ensure no projects are linked
+    const projectCount = await this.prisma.project.count({
+      where: { serverId: id },
+    });
+
+    if (projectCount > 0) {
+      throw new BadRequestException(
+        "Cannot delete server: Please delete all linked projects first to clean up configurations."
+      );
+    }
+
+    // 3. Delete the server node
+    await this.prisma.server.delete({
+      where: { id },
+    });
+
+    return { message: `Server ${server.name} deleted successfully.` };
   }
 }

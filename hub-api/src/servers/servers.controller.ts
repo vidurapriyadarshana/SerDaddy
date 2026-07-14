@@ -1,9 +1,25 @@
-import { Controller, Get, Post, Body, Param, Res, Req, Headers } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Res, Req, Headers } from '@nestjs/common';
 import { ServersService } from './servers.service';
+import * as fs from 'fs';
+import * as path from 'path';
 
 @Controller('api/servers')
 export class ServersController {
   constructor(private readonly service: ServersService) {}
+
+  @Get('download/linux-amd64')
+  async downloadLinuxAgent(@Res() res: any) {
+    const filePath = path.join(process.cwd(), '..', 'agent', 'serdaddy-agent-linux');
+    if (!fs.existsSync(filePath)) {
+      res.status(404).send({ message: 'Agent binary not found.' });
+      return;
+    }
+    res.header('Content-Disposition', 'attachment; filename=serdaddy-agent');
+    res.type('application/octet-stream');
+    
+    const stream = fs.createReadStream(filePath);
+    res.send(stream);
+  }
 
   @Post()
   async create(
@@ -41,5 +57,13 @@ export class ServersController {
     
     // Fastify/Express compatible header type response
     res.type('text/plain').send(script);
+  }
+
+  @Delete(':id')
+  async delete(
+    @Headers('x-user-id') userId: string,
+    @Param('id') id: string
+  ) {
+    return this.service.deleteServer(userId, id);
   }
 }

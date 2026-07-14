@@ -41,12 +41,13 @@ export class DeploymentsProcessor {
     await this.appendLog(deploymentId, `[SerDaddy] Job processed. Transmitting build parameters to Agent...\n`);
 
     try {
-      // 2. Fetch project, server, and variables
+      // 2. Fetch project, server, variables, and user
       const project = await this.prisma.project.findUnique({
         where: { id: projectId },
         include: {
           server: true,
           environmentVariables: true,
+          user: true,
         },
       });
 
@@ -70,12 +71,21 @@ export class DeploymentsProcessor {
         }
       }
 
+      // Secure repoUrl with Github OAuth Token if available
+      let repoUrl = project.repoUrl;
+      if (project.user && project.user.githubToken && project.user.githubToken !== 'MOCK_GITHUB_TOKEN') {
+        if (repoUrl.startsWith('https://github.com/')) {
+          repoUrl = repoUrl.replace('https://github.com/', `https://${project.user.githubToken}@github.com/`);
+        }
+      }
+
       // 4. Construct payload
       const payload = {
         deploymentId,
-        repoUrl: project.repoUrl,
+        repoUrl,
         branch: project.branch,
         assignedPort: project.port,
+        subdomain: project.subdomain ? project.subdomain.trim() : undefined,
         env: envMap,
       };
 
