@@ -147,3 +147,21 @@ func RestartProjectService(projectName string, mock bool) error {
 
 	return nil
 }
+
+// ProvisionSSL configures an Nginx virtual server for SSL using Let's Encrypt Certbot.
+func ProvisionSSL(subdomain string, email string, mock bool) error {
+	if mock {
+		log.Printf("[Mock SSL] Provisioning Let's Encrypt SSL certificate for %s using email %s", subdomain, email)
+		return nil
+	}
+
+	log.Printf("🔒 Running Certbot SSL registration for %s...", subdomain)
+	cmd := exec.Command("sudo", "certbot", "--nginx", "-d", subdomain, "-m", email, "--non-interactive", "--agree-tos", "--redirect")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("certbot command failed: %w. Output: %s", err, string(output))
+	}
+
+	log.Printf("✅ Certbot successfully configured SSL for %s", subdomain)
+	return nil
+}

@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useParams } from "next/navigation";
 import { 
   ArrowLeft, Server, Activity, Terminal, 
-  Cpu, HardDrive, Shield, RefreshCw, AlertTriangle, CheckCircle 
+  Cpu, HardDrive, Shield, RefreshCw, AlertTriangle, CheckCircle, LogOut
 } from "lucide-react";
 import { io, Socket } from "socket.io-client";
 
@@ -24,11 +24,40 @@ export default function ServerDetail() {
   const [metrics, setMetrics] = useState<TelemetryMetrics | null>(null);
   const [installCommand, setInstallCommand] = useState<string>("");
   const [isClient, setIsClient] = useState(false);
+  const [server, setServer] = useState<any>(null);
+  const [username, setUsername] = useState("");
+
+  const fetchServerDetails = async () => {
+    const activeUserId = localStorage.getItem("userId");
+    if (!activeUserId) return;
+
+    try {
+      const res = await fetch(`http://localhost:4000/api/servers/${id}`, {
+        headers: {
+          "x-user-id": activeUserId,
+        },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setServer(data);
+        setStatus(data.status);
+        setInstallCommand(`curl -sSL http://localhost:4000/api/servers/install/${data.agentToken} | bash`);
+      }
+    } catch (err) {
+      console.error("Failed to load server details:", err);
+    }
+  };
 
   // Mark client hydration complete
   useEffect(() => {
+    const activeUserId = localStorage.getItem("userId");
+    if (!activeUserId) {
+      window.location.href = "/";
+      return;
+    }
+    setUsername(localStorage.getItem("username") || "Developer");
     setIsClient(true);
-    setInstallCommand(`curl -sSL http://localhost:4000/api/agent/install | bash -s sd_agt_${id}`);
+    fetchServerDetails();
   }, [id]);
 
   useEffect(() => {
@@ -96,9 +125,18 @@ export default function ServerDetail() {
             TARGET DETAILS
           </span>
         </div>
-        <div className="flex items-center gap-2 bg-white/5 py-1.5 px-3 rounded-full border border-white/5 text-xs text-slate-300 font-semibold">
-          <span>Server ID: </span>
-          <span className="font-mono text-slate-400">{id}</span>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-2 bg-white/5 py-1.5 px-3 rounded-full border border-white/5 text-xs text-slate-300 font-semibold">
+            <span>Server ID: </span>
+            <span className="font-mono text-slate-400">{id}</span>
+          </div>
+          <Link 
+            href="/" 
+            onClick={() => localStorage.clear()}
+            className="p-2 hover:bg-white/5 rounded-xl transition text-slate-400 hover:text-danger"
+          >
+            <LogOut className="w-5 h-5" />
+          </Link>
         </div>
       </header>
 

@@ -14,4 +14,9 @@ export class DeploymentsController {
   async getLogs(@Param('id') deploymentId: string) {
     return this.service.getDeploymentLogs(deploymentId);
   }
+
+  @Post('deployments/:id/rollback')
+  async rollback(@Param('id') deploymentId: string) {
+    return this.service.triggerRollback(deploymentId);
+  }
 }

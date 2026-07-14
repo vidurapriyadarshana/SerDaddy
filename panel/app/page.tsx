@@ -30,14 +30,13 @@ export default function Home() {
         <h2 className="text-xl font-bold mb-1 text-slate-100">Welcome to SerDaddy</h2>
         <p className="text-xs text-slate-400 mb-6">Authorize with GitHub to access your repositories</p>
 
-        {/* GitHub Login button redirecting to dashboard for local dev testing */}
-        <Link 
-          href="/dashboard" 
+        <a 
+          href="http://localhost:4000/api/auth/github" 
           className="w-full py-3.5 px-5 bg-gradient-to-r from-primary to-indigo-700 hover:from-primary hover:to-indigo-600 text-white font-semibold rounded-2xl flex items-center justify-center gap-3 transition-all duration-200 glow-btn"
         >
           <Github className="w-5 h-5" />
           Sign in with GitHub
-        </Link>
+        </a>
 
         {/* Feature Grid */}
         <div className="grid grid-cols-2 gap-4 mt-8 w-full border-t border-white/5 pt-6">

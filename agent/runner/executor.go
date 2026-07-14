@@ -170,6 +170,11 @@ func runMockDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Systemd app service loaded & enabled.\n")
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Nginx reverse proxy sites-enabled mapping updated and reloaded.\n")
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Swapped symbolic link pointer /current -> release active folder.\n")
+	
+	// Provision Let's Encrypt SSL
+	_ = ProvisionSSL(projectName+".local", "admin@serdaddy.com", true)
+	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Let's Encrypt SSL certificate registered.\n")
+
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Build completed successfully! Status set to SUCCESS.\n")
 
 	sendStatus(safeWrite, payload.DeploymentID, "SUCCESS", commitHash, releasePath)
@@ -301,6 +306,15 @@ func runRealDeployment(safeWrite SafeWriteFunc, payload DeployStartPayload, proj
 	}
 
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Swapped release symbolic links, reloaded routers, and restarted processes.\n")
+	
+	// Provision Let's Encrypt SSL using Certbot
+	sslErr := ProvisionSSL(projectName+".local", "admin@serdaddy.com", false)
+	if sslErr != nil {
+		streamLog(safeWrite, payload.DeploymentID, fmt.Sprintf("[SerDaddy] WARNING: Let's Encrypt SSL registration skipped: %s\n", sslErr.Error()))
+	} else {
+		streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Let's Encrypt SSL certificate successfully configured.\n")
+	}
+
 	streamLog(safeWrite, payload.DeploymentID, "[SerDaddy] Build completed successfully!\n")
 
 	sendStatus(safeWrite, payload.DeploymentID, "SUCCESS", commitHash, releasePath)
