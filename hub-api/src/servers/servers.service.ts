@@ -74,9 +74,9 @@ fi
 echo "🚀 Installing SerDaddy Agent on clean target host..."
 
 # 1. Update and install basic dependencies
-echo "📦 Installing system dependencies (git, curl, nginx, certbot)..."
+echo "📦 Installing system dependencies (git, curl, wget, nginx, certbot)..."
 sudo apt-get update -y
-sudo apt-get install -y git curl nginx certbot python3-certbot-nginx
+sudo apt-get install -y git curl wget nginx certbot python3-certbot-nginx
 
 # 2. Install Node.js if not present
 if ! command -v node &> /dev/null; then
@@ -91,8 +91,19 @@ cd /var/www/serdaddy-agent
 
 # 4. Fetch the Go agent binary
 echo "📥 Downloading agent binary..."
+# Stop existing service if running and remove old binary to avoid 'Text file busy'
+if systemctl is-active --quiet serdaddy-agent.service; then
+  echo "🛑 Stopping existing agent service..."
+  sudo systemctl stop serdaddy-agent.service || true
+fi
+sudo rm -f serdaddy-agent
+
 # Dynamically pulls compiled agent matching architecture:
-sudo curl -sSL -o serdaddy-agent "${panelUrl}/api/servers/download/linux-amd64"
+if command -v wget &> /dev/null; then
+  sudo wget -O serdaddy-agent "${panelUrl}/api/servers/download/linux-amd64"
+else
+  sudo curl -sSL -o serdaddy-agent "${panelUrl}/api/servers/download/linux-amd64"
+fi
 sudo chmod +x serdaddy-agent
 
 # 5. Create Systemd Service Configuration
